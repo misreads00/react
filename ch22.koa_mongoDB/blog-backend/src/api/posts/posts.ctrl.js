@@ -1,95 +1,135 @@
-let postId = 1;
+/* eslint-disable require-atomic-updates */
+import Post from '../../models/post';
+import mongoose from 'mongoose';
+import Joi from 'joi';
 
-const posts = [
-    {
-        id: 1,
-        title: '제목',
-        body: '내용',
-    },
-];
+const { ObjectId } = mongoose.Types; 
 
+export const checkObjectId = (ctx, next) => {
+    const { id } = ctx.params;
+    if (!ObjectId.isValid(id)) {
+        ctx.status = 400; //Bad Request
+        return;
+    }
+    return next();
+};
 
-// export const로 작성: write, list/read, remove/replace/update 함수
+// POST /api/posts {title, body, tags}
+export const write = async ctx => {
+    //객체가 다음 필드를 가지고있음을 검증 
+    const schema = Joi.object().keys({ 
+        title: Joi.string().required(), //required는 필수항목
+        body : Joi.string().required(),
+        tags : Joi.array()
+                .items(Joi.string())
+                .required(), //문자열로 된 배열 
+    });
+    //검증 후 실패인 경우 에러처리 
+    const result = Joi.validate(ctx.request.body, schema); 
+    if (result.error) {
+        ctx.status = 400; //Bad request 
+        ctx.body = result.error; 
+        return;
+    }
 
-// POST /api/posts { title, body }
-export const write = ctx => {
-    const { title, body } = ctx.request.body; 
-    postId += 1; 
+    const { title, body, tags } = ctx.request.body;
+    const post = new Post({
+        title, body, tags, 
+    });
 
-    const post = { id: postId, title, body };
-    posts.push(post);
-    ctx.body = post; 
+    try {
+        await post.save();
+        ctx.body = post;
+    } catch (e) {
+        ctx.throw(500, e);
+    }
 };
 
 // GET /api/posts 
-export const list = ctx => {
-    ctx.body = posts; 
+export const list = async ctx => {
+    //pagination : query문자열을 숫자로 변환해줘야하고, 값 주어지지 않았다면 1을 기본. 
+    const page = parseInt(ctx.query.page || '1',10);
+    if (page<1) {
+        ctx.status = 400;
+        return;
+    } 
+
+    try {
+        const posts = await Post.find()
+        .sort({ _id:-1 })
+        .limit(10)
+        .skip((page-1) * 10)
+        .lean() //toJSON() 안해도 처음부터 조회가능. 
+        .exec();
+        //Last-Page라는 커스텀 HTTP 헤더 설정하는 방법. 
+        const postCount = await Post.countDocuments().exec();
+        ctx.set('Last-Page', Math.ceil(postCount / 10));
+        //200자 초과할경우 생략하도록 표기. 
+        ctx.body = posts.map(post => ({
+            ...post,
+            body: post.body.length < 200 ? post.body : `${post.body.slice(0,200)}...`, 
+        }));
+    } catch (e) {
+        ctx.throw(500, e);
+    }
 };
 
 // GET /api/posts/:id 
-export const read = ctx => {
+export const read = async ctx => {
     const { id } = ctx.params;
-    const post = posts.find(p => p.id.toString() === id );
-    if (!post) {
-        ctx.status = 404; 
-        ctx.body = {
-            message: '포스트가 존재하지 않습니다.',
-        }; 
-        return;
+    try {
+        const post = await Post.findById(id).exec();
+        if (!post) {
+            ctx.status = 404; 
+            return; 
+        }
+        ctx.body = post; 
+    } catch (e) {
+        ctx.throw(500, e);
     }
-    ctx.body = post; 
 };
-
 
 // DELETE /api/posts/:id 
-export const remove = ctx => {
+export const remove = async ctx => {
     const { id } = ctx.params;
-    const index = posts.findIndex(p => p.id.toString() === id);
-    if (index === -1) {
-        ctx.status = 404; 
-        ctx.body = {
-            message:'포스트가 존재하지 않습니다.',
-        };
-        return;
+    try {
+        await Post.findByIdAndRemove(id).exec();
+        ctx.status = 204; //No content 
+    } catch (e) {
+        ctx.throw(500, e);
     }
-    posts.splice(index, 1); //index번째 아이템 제거 
-    ctx.status = 204; //No Content 
 };
 
-// PUT /api/posts/:id { title, body } (교체)
-export const replace = ctx => {
+// UPDATE /api/posts/:id {title, body, tags}
+export const update = async ctx => {
     const { id } = ctx.params;
-    const index = posts.findIndex(p => p.id.toString() === id);
-    if (index === -1) {
-        ctx.status = 404;
-        ctx.body = {
-            message:'포스트가 존재하지 않습니다.',
-        };
-        return; 
-    }
-    //PUT은 전체 객체를 덮어씌우기. id를 제외한 기존정보 날리고, 객체를 새로 만든다. 
-    posts[index] = {
-        id, 
-        ...ctx.request.body,  
-    };
-    ctx.body = posts[index];
-};
 
-// PATCH /api/posts/:id { title, body } (특정필드 변경)
-export const update = ctx => {
-    const { id } = ctx.params;
-    const index = posts.findIndex(p => p.id.toString() === id); 
-    if(index === -1) {
-        ctx.stats = 404;
-        ctx.body = {
-            message:'포스트가 존재하지 않습니다',
-        };
+    //객체가 다음 필드를 가지고있음을 검증 - 단, required가 없다. 
+    const schema = Joi.object().keys({
+        title: Joi.string(),
+        body: Joi.string(),
+        tags: Joi.array().items(Joi.string()),
+    });
+
+    //검증 후 실패인 경우 에러처리 
+    const result = Joi.validate(ctx.request.body, schema);
+    if (result.error) {
+        ctx.status = 400; //Bad request 
+        ctx.body = result.error;
         return;
     }
-    //PATCH는 기존값에 덮어씌우기. 
-    posts[index] = {
-        ...posts[index],
-        ...ctx.request.body,
-    };
-    ctx.body = posts[index];
+
+    try {
+        const post = await Post.findByIdAndUpdate(id, ctx.request.body, {
+            new: true, //이값을 설정하면 업데이트된 데이터를 반환. false일땐 업데이트전 데이터. 
+        }).exec();
+        if (!post) {
+            ctx.status = 404;
+            return;
+        }
+        ctx.body = post;
+    } catch (e) {
+        ctx.throw(500, e);
+    }
 };
+
