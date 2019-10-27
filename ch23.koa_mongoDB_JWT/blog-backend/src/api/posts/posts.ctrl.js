@@ -5,14 +5,38 @@ import Joi from 'joi';
 
 const { ObjectId } = mongoose.Types; 
 
-export const checkObjectId = (ctx, next) => {
+export const getPostById = async (ctx, next) => {
     const { id } = ctx.params;
     if (!ObjectId.isValid(id)) {
         ctx.status = 400; //Bad Request
         return;
     }
+    //작성자만 post 수정/삭제 가능하도록 id로 post 찾고 ctx.state에 담는다.  
+    try {
+        const post = await Post.findById(id);
+        if (!post) {
+            ctx.status = 404; //Not found
+            return;
+        } 
+        ctx.state.post = post; 
+        return next();
+    } catch (e) {
+        ctx.throw(500, e);
+    }
+};
+
+//위 id로 찾은 post가 로그인 중인 사용자가 작성한 것인지 확인 
+//여기까지 작성하고 기존 export read 함수에 있던걸 다 생략함. 
+export const checkOwnPost = (ctx, next) => {
+    const { user, post } = ctx.state;
+    if (post.user._id.toString() !== user._id) {
+        ctx.status = 403; //사용자의 post 아님 
+        return;
+    }
     return next();
 };
+
+
 
 // POST /api/posts {title, body, tags}
 export const write = async ctx => {
@@ -34,9 +58,11 @@ export const write = async ctx => {
 
     const { title, body, tags } = ctx.request.body;
     const post = new Post({
-        title, body, tags, 
+        title, 
+        body, 
+        tags, 
+        user: ctx.state.user, 
     });
-
     try {
         await post.save();
         ctx.body = post;
@@ -45,49 +71,53 @@ export const write = async ctx => {
     }
 };
 
+
+
 // GET /api/posts 
 export const list = async ctx => {
     //pagination : query문자열을 숫자로 변환해줘야하고, 값 주어지지 않았다면 1을 기본. 
     const page = parseInt(ctx.query.page || '1',10);
-    if (page<1) {
+
+    if (page < 1) {
         ctx.status = 400;
         return;
     } 
 
+    const { tag, username } = ctx.query;
+    //tag, username 값이 유효하면 객체안에 넣고, 그렇지 않으면 넣지 않음 
+    const query = {
+        ...(username ? {'user.username' : username } : {}),
+        ...(tag ? { tags : tag } : {}),
+    };
     try {
-        const posts = await Post.find()
+        const posts = await Post.find(query)
         .sort({ _id:-1 })
         .limit(10)
         .skip((page-1) * 10)
         .lean() //toJSON() 안해도 처음부터 조회가능. 
         .exec();
         //Last-Page라는 커스텀 HTTP 헤더 설정하는 방법. 
-        const postCount = await Post.countDocuments().exec();
+        const postCount = await Post.countDocuments(query).exec();
         ctx.set('Last-Page', Math.ceil(postCount / 10));
         //200자 초과할경우 생략하도록 표기. 
         ctx.body = posts.map(post => ({
             ...post,
-            body: post.body.length < 200 ? post.body : `${post.body.slice(0,200)}...`, 
+            body: 
+                post.body.length < 200 ? post.body : `${post.body.slice(0,200)}...`, 
         }));
     } catch (e) {
         ctx.throw(500, e);
     }
 };
 
+
+
 // GET /api/posts/:id 
-export const read = async ctx => {
-    const { id } = ctx.params;
-    try {
-        const post = await Post.findById(id).exec();
-        if (!post) {
-            ctx.status = 404; 
-            return; 
-        }
-        ctx.body = post; 
-    } catch (e) {
-        ctx.throw(500, e);
-    }
+export const read = ctx => {
+    ctx.body = ctx.state.post;
 };
+
+
 
 // DELETE /api/posts/:id 
 export const remove = async ctx => {
@@ -99,6 +129,8 @@ export const remove = async ctx => {
         ctx.throw(500, e);
     }
 };
+
+
 
 // UPDATE /api/posts/:id {title, body, tags}
 export const update = async ctx => {
