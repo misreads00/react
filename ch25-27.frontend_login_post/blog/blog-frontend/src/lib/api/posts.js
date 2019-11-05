@@ -17,7 +17,18 @@ export const listPosts = ({ page, username, tag }) => {
       tag,
     });
     return client.get(`/api/posts?${queryString}`);
-  };
+};
+
+export const updatePost = ({ id, title, body, tags }) => {
+  return (
+    client.patch(`/api/posts/${id}`, {
+    title, 
+    body,
+    tags,
+  }));
+};
+
+export const removePost = id => client.delete(`/api/posts/${id}`);
 
   /*
   축약하면 이렇게. 

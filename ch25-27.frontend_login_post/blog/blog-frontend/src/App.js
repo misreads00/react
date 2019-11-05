@@ -5,6 +5,7 @@ import PostPage from './pages/PostPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import WritePage from './pages/WritePage';
+import { Helmet } from 'react-helmet-async';
 
 // api axios 전까지 구현함. 
 // 현 상황에서 
@@ -13,6 +14,9 @@ import WritePage from './pages/WritePage';
 const App = () => {
   return (
     <>
+      <Helmet>
+        <title>REACTERS</title>
+      </Helmet>
       <Route component={PostListPage} path={['/@:username', '/']} exact />
       <Route component={LoginPage} path="/login" />
       <Route component={RegisterPage} path="/register" />

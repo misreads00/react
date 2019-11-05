@@ -61,6 +61,14 @@ const Editor = ({ title, body, onChangeField }) => {
     });
   }, [onChangeField]);
 
+  const mounted = useRef(false);
+  useEffect(() => {
+    if(mounted.current) return;
+    mounted.current = true;
+    quillInstance.current.root.innerHTML = body; 
+  }, [body]); 
+  //es-lint 규칙상 useEFFect에서 사용하는 모든 외부값을 2번째 파라미터에 넣도록 권장. 
+
   const onChangeTitle = e => {
     onChangeField({ key: 'title', value: e.target.value });
   };
